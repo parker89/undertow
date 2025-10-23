@@ -19,6 +19,7 @@ import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.TearDown;
 import org.openjdk.jmh.annotations.Threads;
 import org.openjdk.jmh.annotations.Warmup;
+import org.openjdk.jmh.runner.BenchmarkException;
 import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.RunnerException;
 import org.openjdk.jmh.runner.options.Options;
@@ -95,6 +96,14 @@ public class VirtualThreadPoolContentionBenchmark {
 
     @Setup(Level.Trial)
     public void setupTrial() {
+        // Skip invalid combination: virtual threads with thread-local cache
+        if ("virtual".equals(threadType) && threadLocalCacheSize > 0) {
+            throw new BenchmarkException(new RuntimeException(
+                "Skipping benchmark: virtual threads with thread-local cache size > 0 " +
+                "causes excessive memory usage (each virtual thread gets its own cache)"
+            ));
+        }
+
         // Create the appropriate pool based on parameter
         if ("DefaultByteBufferPool".equals(poolType)) {
             // DefaultByteBufferPool(direct, bufferSize, maxPoolSize, threadLocalCacheSize)
