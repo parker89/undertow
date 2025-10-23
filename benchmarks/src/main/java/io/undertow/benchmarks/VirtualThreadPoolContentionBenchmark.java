@@ -204,8 +204,12 @@ public class VirtualThreadPoolContentionBenchmark {
         // Wait for all tasks to complete
         completionLatch.await();
 
-        // Return task count if all completed (prevents DCE)
-        return completionLatch.getCount() == 0 ? numTasks : 0;
+        // Verify all tasks completed (prevents DCE and validates correctness)
+        long remaining = completionLatch.getCount();
+        if (remaining != 0) {
+            throw new RuntimeException("Expected all tasks to complete, but " + remaining + " tasks are still pending");
+        }
+        return numTasks;
     }
 
     @TearDown(Level.Invocation)
