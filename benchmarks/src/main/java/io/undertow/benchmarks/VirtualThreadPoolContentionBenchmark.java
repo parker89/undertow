@@ -4,6 +4,7 @@ import io.undertow.connector.ByteBufferPool;
 import io.undertow.connector.PooledByteBuffer;
 import io.undertow.server.DefaultByteBufferPool;
 import io.undertow.server.DefaultByteBufferPool2;
+import io.undertow.server.DefaultByteBufferPool3;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -31,8 +32,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * JMH benchmark comparing DefaultByteBufferPool and DefaultByteBufferPool2
- * under high contention using virtual threads.
+ * JMH benchmark comparing DefaultByteBufferPool, DefaultByteBufferPool2, and DefaultByteBufferPool3
+ * under high contention using virtual or platform threads.
  *
  * Creates many tasks (numTasks) but limits concurrent execution to maxConcurrency
  * using a semaphore. This simulates realistic contention where many tasks compete
@@ -60,21 +61,34 @@ public class VirtualThreadPoolContentionBenchmark {
     private CountDownLatch completionLatch;
     private AtomicInteger successCount;
 
-    @Param({"DefaultByteBufferPool", "DefaultByteBufferPool2"})
+    //@Param({"DefaultByteBufferPool", "DefaultByteBufferPool2", "DefaultByteBufferPool3", "DefaultByteBufferPool"})
+    @Param({"DefaultByteBufferPool", "DefaultByteBufferPool"})
     private String poolType;
 
     @Param({"16384"})  // Buffer sizes to test
     private int bufferSize;
 
-    @Param({"8", "16", "32", "64"})  // Number of concurrent virtual threads allowed
+    //@Param({"8", "16", "32", "64"})  // Number of concurrent virtual threads allowed
+    //@Param({"1", "2", "4", "8"})  // Number of concurrent virtual threads allowed
+    //@Param({"64", "128", "256", "512", "1024", "2048", "4096"})  // Number of concurrent virtual threads allowed
+
+    //@Param({"8192", "16384", "32768"})  // Number of concurrent virtual threads allowed
+    @Param({"1024"})  // Number of concurrent virtual threads allowed
     private int maxConcurrency;
 
     @Param({"100000"})  // Total number of tasks
     private int numTasks;
 
-    @Param({"false", "true"})  // Whether to prefill the pool cache before benchmark
+    //@Param({"false", "true"})  // Whether to prefill the pool cache before benchmark
+    @Param({"false"})  // Whether to prefill the pool cache before benchmark
     //starts with a for column ordering purposes
     private boolean aPreFillCache;
+
+    @Param({"virtual", "platform"})  // Thread type to use
+    private String threadType;
+
+    @Param({"0", "10"})  // Thread local cache size (0 = disabled)
+    private int threadLocalCacheSize;
 
     private static final int BUFFERS_PER_TASK = 1;
     private static final int MAXIMUM_POOL_SIZE = 1000;
@@ -84,10 +98,13 @@ public class VirtualThreadPoolContentionBenchmark {
         // Create the appropriate pool based on parameter
         if ("DefaultByteBufferPool".equals(poolType)) {
             // DefaultByteBufferPool(direct, bufferSize, maxPoolSize, threadLocalCacheSize)
-            pool = new DefaultByteBufferPool(true, bufferSize, MAXIMUM_POOL_SIZE, 0);
+            pool = new DefaultByteBufferPool(true, bufferSize, MAXIMUM_POOL_SIZE, threadLocalCacheSize);
         } else if ("DefaultByteBufferPool2".equals(poolType)) {
             // DefaultByteBufferPool2(direct, bufferSize, maxPoolSize, threadLocalCacheSize)
-            pool = new DefaultByteBufferPool2(true, bufferSize, MAXIMUM_POOL_SIZE, 0);
+            pool = new DefaultByteBufferPool2(true, bufferSize, MAXIMUM_POOL_SIZE, threadLocalCacheSize);
+        } else if ("DefaultByteBufferPool3".equals(poolType)) {
+            // DefaultByteBufferPool3(direct, bufferSize, maxPoolSize, threadLocalCacheSize)
+            pool = new DefaultByteBufferPool3(true, bufferSize, MAXIMUM_POOL_SIZE, threadLocalCacheSize);
         } else {
             throw new IllegalArgumentException("Unknown pool type: " + poolType);
         }
@@ -116,8 +133,15 @@ public class VirtualThreadPoolContentionBenchmark {
         completionLatch = new CountDownLatch(numTasks);
         successCount = new AtomicInteger(0);
 
-        // Create virtual thread executor
-        executor = Executors.newVirtualThreadPerTaskExecutor();
+        // Create executor based on thread type
+        if ("virtual".equals(threadType)) {
+            executor = Executors.newVirtualThreadPerTaskExecutor();
+        } else if ("platform".equals(threadType)) {
+            // Use fixed thread pool with exactly maxConcurrency platform threads
+            executor = Executors.newFixedThreadPool(maxConcurrency);
+        } else {
+            throw new IllegalArgumentException("Unknown thread type: " + threadType);
+        }
 
         // Submit all tasks (not measured - happens in setup)
         for (int i = 0; i < numTasks; i++) {
