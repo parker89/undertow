@@ -62,7 +62,7 @@ public class VirtualThreadPoolContentionBenchmark {
     private AtomicInteger successCount;
 
     //@Param({"DefaultByteBufferPool", "DefaultByteBufferPool2", "DefaultByteBufferPool3", "DefaultByteBufferPool"})
-    @Param({"DefaultByteBufferPool", "DefaultByteBufferPool"})
+    @Param({"DefaultByteBufferPool"})
     private String poolType;
 
     @Param({"16384"})  // Buffer sizes to test
@@ -90,7 +90,7 @@ public class VirtualThreadPoolContentionBenchmark {
     @Param({"0", "10"})  // Thread local cache size (0 = disabled)
     private int threadLocalCacheSize;
 
-    private static final int BUFFERS_PER_TASK = 1;
+    private static final int BUFFERS_PER_TASK = 5;
     private static final int MAXIMUM_POOL_SIZE = 1000;
 
     @Setup(Level.Trial)
