@@ -191,13 +191,15 @@ public class DefaultByteBufferPool implements ByteBufferPool {
             DirectByteBufferDeallocator.free(buffer);
             return; //GC will take care of it
         }
-        final ThreadLocalData local = threadLocalCache.get();
-        if(local != null) {
-            if(local.allocationDepth > 0) {
-                local.allocationDepth--;
-                if (local.buffers.size() < threadLocalCacheSize) {
-                    local.buffers.add(buffer);
-                    return;
+        if(threadLocalCacheSize > 0) {
+            final ThreadLocalData local = threadLocalCache.get();
+            if (local != null) {
+                if (local.allocationDepth > 0) {
+                    local.allocationDepth--;
+                    if (local.buffers.size() < threadLocalCacheSize) {
+                        local.buffers.add(buffer);
+                        return;
+                    }
                 }
             }
         }
