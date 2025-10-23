@@ -38,6 +38,8 @@
         <maven.compiler.release>25</maven.compiler.release>
         <maven.compiler.source>25</maven.compiler.source>
         <maven.compiler.target>25</maven.compiler.target>
+        <!-- Override parent to use newer JMH for JavaFlightRecorderProfiler -->
+        <version.jmh>1.37</version.jmh>
     </properties>
 
     <dependencies>
@@ -94,7 +96,7 @@
                         <path>
                             <groupId>org.openjdk.jmh</groupId>
                             <artifactId>jmh-generator-annprocess</artifactId>
-                            <version>1.21</version>
+                            <version>${version.jmh}</version>
                         </path>
                     </annotationProcessorPaths>
                 </configuration>

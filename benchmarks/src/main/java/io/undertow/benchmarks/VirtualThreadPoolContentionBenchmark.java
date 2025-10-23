@@ -7,6 +7,8 @@ import io.undertow.server.DefaultByteBufferPool2;
 import io.undertow.server.DefaultByteBufferPool3;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.profile.JavaFlightRecorderProfiler;
+
 import org.openjdk.jmh.annotations.Fork;
 import org.openjdk.jmh.annotations.Level;
 import org.openjdk.jmh.annotations.Measurement;
@@ -57,7 +59,6 @@ public class VirtualThreadPoolContentionBenchmark {
     private ByteBufferPool pool;
     private ExecutorService executor;
     private Semaphore concurrencyLimiter;
-    private CountDownLatch startLatch;
     private CountDownLatch completionLatch;
 
     //@Param({"DefaultByteBufferPool", "DefaultByteBufferPool2", "DefaultByteBufferPool3", "DefaultByteBufferPool"})
@@ -136,7 +137,6 @@ public class VirtualThreadPoolContentionBenchmark {
     public void setupInvocation() {
         // Setup for each benchmark invocation
         concurrencyLimiter = new Semaphore(maxConcurrency, true);  // Fair semaphore
-        startLatch = new CountDownLatch(1);
         completionLatch = new CountDownLatch(numTasks);
 
         // Create executor based on thread type
@@ -148,14 +148,14 @@ public class VirtualThreadPoolContentionBenchmark {
         } else {
             throw new IllegalArgumentException("Unknown thread type: " + threadType);
         }
+    }
 
-        // Submit all tasks (not measured - happens in setup)
+    @Benchmark
+    public int contentionTest() throws InterruptedException {
+        // Submit all tasks and measure their execution
         for (int i = 0; i < numTasks; i++) {
             executor.submit(() -> {
                 try {
-                    // Wait for benchmark to signal start
-                    startLatch.await();
-
                     // Acquire permit (blocks if maxConcurrency threads are already running)
                     concurrencyLimiter.acquire();
 
@@ -194,12 +194,6 @@ public class VirtualThreadPoolContentionBenchmark {
 
         // Prevent new tasks from being submitted
         executor.shutdown();
-    }
-
-    @Benchmark
-    public int contentionTest() throws InterruptedException {
-        // Signal all waiting threads to begin work (this is what we measure)
-        startLatch.countDown();
 
         // Wait for all tasks to complete
         completionLatch.await();
@@ -233,6 +227,7 @@ public class VirtualThreadPoolContentionBenchmark {
                 .forks(1)
                 .warmupIterations(3)
                 .measurementIterations(5)
+                .addProfiler(JavaFlightRecorderProfiler.class, "")
                 .build();
 
         new Runner(opt).run();
