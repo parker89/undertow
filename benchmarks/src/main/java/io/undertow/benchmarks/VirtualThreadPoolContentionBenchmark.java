@@ -30,7 +30,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * JMH benchmark comparing DefaultByteBufferPool, DefaultByteBufferPool2, and DefaultByteBufferPool3
@@ -60,7 +59,6 @@ public class VirtualThreadPoolContentionBenchmark {
     private Semaphore concurrencyLimiter;
     private CountDownLatch startLatch;
     private CountDownLatch completionLatch;
-    private AtomicInteger successCount;
 
     //@Param({"DefaultByteBufferPool", "DefaultByteBufferPool2", "DefaultByteBufferPool3", "DefaultByteBufferPool"})
     @Param({"DefaultByteBufferPool"})
@@ -140,7 +138,6 @@ public class VirtualThreadPoolContentionBenchmark {
         concurrencyLimiter = new Semaphore(maxConcurrency, true);  // Fair semaphore
         startLatch = new CountDownLatch(1);
         completionLatch = new CountDownLatch(numTasks);
-        successCount = new AtomicInteger(0);
 
         // Create executor based on thread type
         if ("virtual".equals(threadType)) {
@@ -183,8 +180,6 @@ public class VirtualThreadPoolContentionBenchmark {
                         for (int j = 0; j < BUFFERS_PER_TASK; j++) {
                             buffers[j].close();
                         }
-
-                        successCount.incrementAndGet();
                     } finally {
                         // Always release the permit
                         concurrencyLimiter.release();
@@ -209,8 +204,8 @@ public class VirtualThreadPoolContentionBenchmark {
         // Wait for all tasks to complete
         completionLatch.await();
 
-        // Return total successful operations
-        return successCount.get();
+        // Return task count if all completed (prevents DCE)
+        return completionLatch.getCount() == 0 ? numTasks : 0;
     }
 
     @TearDown(Level.Invocation)
