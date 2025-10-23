@@ -60,6 +60,7 @@ public class VirtualThreadPoolContentionBenchmark {
     private ExecutorService executor;
     private Semaphore concurrencyLimiter;
     private CountDownLatch completionLatch;
+    private Runnable bufferTask;
 
     //@Param({"DefaultByteBufferPool", "DefaultByteBufferPool2", "DefaultByteBufferPool3", "DefaultByteBufferPool"})
     @Param({"DefaultByteBufferPool"})
@@ -148,48 +149,17 @@ public class VirtualThreadPoolContentionBenchmark {
         } else {
             throw new IllegalArgumentException("Unknown thread type: " + threadType);
         }
+
+        // Create reusable task to minimize object allocation (1 instance vs numTasks instances)
+        bufferTask = new BufferTask();
     }
 
     @Benchmark
     public int contentionTest() throws InterruptedException {
-        // Submit all tasks and measure their execution
+        // Submit all tasks using reusable Runnable (minimize object allocation)
+        // Use execute() instead of submit() to avoid Future wrapper overhead
         for (int i = 0; i < numTasks; i++) {
-            executor.submit(() -> {
-                try {
-                    // Acquire permit (blocks if maxConcurrency threads are already running)
-                    concurrencyLimiter.acquire();
-
-                    try {
-                        // Allocate and close buffers
-                        PooledByteBuffer[] buffers = new PooledByteBuffer[BUFFERS_PER_TASK];
-
-                        // Allocate all buffers
-                        for (int j = 0; j < BUFFERS_PER_TASK; j++) {
-                            buffers[j] = pool.allocate();
-                            if (buffers[j] == null) {
-                                throw new RuntimeException("Failed to allocate buffer");
-                            }
-                        }
-
-                        // Do minimal work with buffers (just write a byte to each)
-                        for (int j = 0; j < BUFFERS_PER_TASK; j++) {
-                            buffers[j].getBuffer().put((byte) j);
-                        }
-
-                        // Close all buffers (return to pool)
-                        for (int j = 0; j < BUFFERS_PER_TASK; j++) {
-                            buffers[j].close();
-                        }
-                    } finally {
-                        // Always release the permit
-                        concurrencyLimiter.release();
-                    }
-                } catch (Exception e) {
-                    e.printStackTrace();
-                } finally {
-                    completionLatch.countDown();
-                }
-            });
+            executor.execute(bufferTask);
         }
 
         // Prevent new tasks from being submitted
@@ -218,6 +188,50 @@ public class VirtualThreadPoolContentionBenchmark {
     @TearDown(Level.Trial)
     public void tearDown() {
         pool = null;
+    }
+
+    /**
+     * Reusable task for buffer allocation/deallocation.
+     * Instance inner class to access benchmark fields (pool, concurrencyLimiter, completionLatch).
+     */
+    private class BufferTask implements Runnable {
+        @Override
+        public void run() {
+            try {
+                // Acquire permit (blocks if maxConcurrency threads are already running)
+                concurrencyLimiter.acquire();
+
+                try {
+                    // Allocate and close buffers
+                    PooledByteBuffer[] buffers = new PooledByteBuffer[BUFFERS_PER_TASK];
+
+                    // Allocate all buffers
+                    for (int j = 0; j < BUFFERS_PER_TASK; j++) {
+                        buffers[j] = pool.allocate();
+                        if (buffers[j] == null) {
+                            throw new RuntimeException("Failed to allocate buffer");
+                        }
+                    }
+
+                    // Do minimal work with buffers (just write a byte to each)
+                    for (int j = 0; j < BUFFERS_PER_TASK; j++) {
+                        buffers[j].getBuffer().put((byte) j);
+                    }
+
+                    // Close all buffers (return to pool)
+                    for (int j = 0; j < BUFFERS_PER_TASK; j++) {
+                        buffers[j].close();
+                    }
+                } finally {
+                    // Always release the permit
+                    concurrencyLimiter.release();
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            } finally {
+                completionLatch.countDown();
+            }
+        }
     }
 
     // Main method to run the benchmark
