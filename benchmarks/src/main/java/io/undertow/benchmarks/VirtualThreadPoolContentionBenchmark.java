@@ -91,8 +91,10 @@ public class VirtualThreadPoolContentionBenchmark {
     @Param({"0", "10"})  // Thread local cache size (0 = disabled)
     private int threadLocalCacheSize;
 
+    @Param({"1000"})  // Maximum pool size
+    private int maxPoolSize;
+
     private static final int BUFFERS_PER_TASK = 5;
-    private static final int MAXIMUM_POOL_SIZE = 1000;
 
     @Setup(Level.Trial)
     public void setupTrial() {
@@ -107,28 +109,28 @@ public class VirtualThreadPoolContentionBenchmark {
         // Create the appropriate pool based on parameter
         if ("DefaultByteBufferPool".equals(poolType)) {
             // DefaultByteBufferPool(direct, bufferSize, maxPoolSize, threadLocalCacheSize)
-            pool = new DefaultByteBufferPool(true, bufferSize, MAXIMUM_POOL_SIZE, threadLocalCacheSize);
+            pool = new DefaultByteBufferPool(true, bufferSize, maxPoolSize, threadLocalCacheSize);
         } else if ("DefaultByteBufferPool2".equals(poolType)) {
             // DefaultByteBufferPool2(direct, bufferSize, maxPoolSize, threadLocalCacheSize)
-            pool = new DefaultByteBufferPool2(true, bufferSize, MAXIMUM_POOL_SIZE, threadLocalCacheSize);
+            pool = new DefaultByteBufferPool2(true, bufferSize, maxPoolSize, threadLocalCacheSize);
         } else if ("DefaultByteBufferPool3".equals(poolType)) {
             // DefaultByteBufferPool3(direct, bufferSize, maxPoolSize, threadLocalCacheSize)
-            pool = new DefaultByteBufferPool3(true, bufferSize, MAXIMUM_POOL_SIZE, threadLocalCacheSize);
+            pool = new DefaultByteBufferPool3(true, bufferSize, maxPoolSize, threadLocalCacheSize);
         } else {
             throw new IllegalArgumentException("Unknown pool type: " + poolType);
         }
 
         // Optionally prefill the pool cache
         if (aPreFillCache) {
-            PooledByteBuffer[] buffers = new PooledByteBuffer[MAXIMUM_POOL_SIZE];
+            PooledByteBuffer[] buffers = new PooledByteBuffer[maxPoolSize];
 
             // Allocate all buffers
-            for (int i = 0; i < MAXIMUM_POOL_SIZE; i++) {
+            for (int i = 0; i < maxPoolSize; i++) {
                 buffers[i] = pool.allocate();
             }
 
             // Close all buffers (return them to the pool)
-            for (int i = 0; i < MAXIMUM_POOL_SIZE; i++) {
+            for (int i = 0; i < maxPoolSize; i++) {
                 buffers[i].close();
             }
         }
