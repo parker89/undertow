@@ -63,7 +63,7 @@ public class VirtualThreadPoolContentionBenchmark {
     private Runnable bufferTask;
 
     //@Param({"DefaultByteBufferPool", "DefaultByteBufferPool2", "DefaultByteBufferPool3", "DefaultByteBufferPool"})
-    @Param({"DefaultByteBufferPool"})
+    @Param({"DefaultByteBufferPool", "DefaultByteBufferPool4"})
     private String poolType;
 
     @Param({"16384"})  // Buffer sizes to test
@@ -116,6 +116,9 @@ public class VirtualThreadPoolContentionBenchmark {
         } else if ("DefaultByteBufferPool3".equals(poolType)) {
             // DefaultByteBufferPool3(direct, bufferSize, maxPoolSize, threadLocalCacheSize)
             pool = new DefaultByteBufferPool3(true, bufferSize, maxPoolSize, threadLocalCacheSize);
+        } else if ("DefaultByteBufferPool4".equals(poolType)) {
+            // DefaultByteBufferPool3(direct, bufferSize, maxPoolSize, threadLocalCacheSize)
+            pool = new DefaultByteBufferPool4(true, bufferSize, maxPoolSize, threadLocalCacheSize);
         } else {
             throw new IllegalArgumentException("Unknown pool type: " + poolType);
         }
