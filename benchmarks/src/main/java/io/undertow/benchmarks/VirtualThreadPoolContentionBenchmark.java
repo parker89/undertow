@@ -5,6 +5,7 @@ import io.undertow.connector.PooledByteBuffer;
 import io.undertow.server.DefaultByteBufferPool;
 import io.undertow.server.DefaultByteBufferPool2;
 import io.undertow.server.DefaultByteBufferPool3;
+import io.undertow.server.DefaultByteBufferPool4;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.profile.JavaFlightRecorderProfiler;
