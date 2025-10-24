@@ -64,7 +64,7 @@ public class VirtualThreadPoolContentionBenchmark {
     private Runnable bufferTask;
 
     //@Param({"DefaultByteBufferPool", "DefaultByteBufferPool2", "DefaultByteBufferPool3", "DefaultByteBufferPool"})
-    @Param({"DefaultByteBufferPool", "DefaultByteBufferPool4"})
+    @Param({"DefaultByteBufferPool4", "DefaultByteBufferPool"})
     private String poolType;
 
     @Param({"16384"})  // Buffer sizes to test
@@ -157,7 +157,7 @@ public class VirtualThreadPoolContentionBenchmark {
         }
 
         // Create reusable task to minimize object allocation (1 instance vs numTasks instances)
-        bufferTask = new BufferTask();
+        bufferTask = new ArithmeticTask();  // TEMP: Using arithmetic task instead of BufferTask
     }
 
     @Benchmark
@@ -227,6 +227,39 @@ public class VirtualThreadPoolContentionBenchmark {
                     // Close all buffers (return to pool)
                     for (int j = 0; j < BUFFERS_PER_TASK; j++) {
                         buffers[j].close();
+                    }
+                } finally {
+                    // Always release the permit
+                    concurrencyLimiter.release();
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            } finally {
+                completionLatch.countDown();
+            }
+        }
+    }
+
+    /**
+     * Simple arithmetic task for baseline comparison.
+     * Just adds numbers without any buffer allocation.
+     */
+    private class ArithmeticTask implements Runnable {
+        @Override
+        public void run() {
+            try {
+                // Acquire permit (blocks if maxConcurrency threads are already running)
+                concurrencyLimiter.acquire();
+
+                try {
+                    // Just do some simple arithmetic
+                    int sum = 0;
+                    for (int j = 0; j < BUFFERS_PER_TASK; j++) {
+                        sum += j * 2;
+                    }
+                    // Prevent DCE by using the result
+                    if (sum < 0) {
+                        throw new RuntimeException("Unexpected sum: " + sum);
                     }
                 } finally {
                     // Always release the permit
