@@ -74,7 +74,7 @@ public class VirtualThreadPoolContentionBenchmark {
     //@Param({"64", "128", "256", "512", "1024", "2048", "4096"})  // Number of concurrent virtual threads allowed
 
     //@Param({"8192", "16384", "32768"})  // Number of concurrent virtual threads allowed
-    @Param({"1024"})  // Number of concurrent virtual threads allowed
+    @Param({"256"})  // Number of concurrent virtual threads allowed
     private int maxConcurrency;
 
     @Param({"100000"})  // Total number of tasks
