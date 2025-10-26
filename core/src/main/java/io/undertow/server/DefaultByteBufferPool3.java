@@ -43,6 +43,7 @@ import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
  *
  * @author Stuart Douglas
  */
+// DefaultByteBufferPool3 shards the global queue. if the shard is full/empty it queries all queues in the array.
 public class DefaultByteBufferPool3 implements ByteBufferPool {
 
     private final ThreadLocalCache threadLocalCache = new ThreadLocalCache();
@@ -238,13 +239,15 @@ public class DefaultByteBufferPool3 implements ByteBufferPool {
             DirectByteBufferDeallocator.free(buffer);
             return; //GC will take care of it
         }
-        final ThreadLocalData local = threadLocalCache.get();
-        if(local != null) {
-            if(local.allocationDepth > 0) {
-                local.allocationDepth--;
-                if (local.buffers.size() < threadLocalCacheSize) {
-                    local.buffers.add(buffer);
-                    return;
+        if(threadLocalCacheSize > 0) {
+            final ThreadLocalData local = threadLocalCache.get();
+            if (local != null) {
+                if (local.allocationDepth > 0) {
+                    local.allocationDepth--;
+                    if (local.buffers.size() < threadLocalCacheSize) {
+                        local.buffers.add(buffer);
+                        return;
+                    }
                 }
             }
         }

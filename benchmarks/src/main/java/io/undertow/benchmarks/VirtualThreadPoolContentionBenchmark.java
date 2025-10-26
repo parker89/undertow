@@ -52,8 +52,8 @@ import java.util.concurrent.TimeUnit;
 
 @State(Scope.Benchmark)
 @Fork(1)  // Single fork for consistency
-@Warmup(iterations = 3, time = 2)  // 3 warmup iterations, 2 seconds each
-@Measurement(iterations = 5, time = 3)  // 5 measurement iterations, 3 seconds each
+@Warmup(iterations = 3, time = 4)  // 3 warmup iterations, 2 seconds each
+@Measurement(iterations = 5, time = 30)  // 5 measurement iterations, 3 seconds each
 @Threads(1)  // JMH thread count (we'll use virtual threads internally)
 public class VirtualThreadPoolContentionBenchmark {
 
@@ -63,8 +63,8 @@ public class VirtualThreadPoolContentionBenchmark {
     private CountDownLatch completionLatch;
     private Runnable bufferTask;
 
-    //@Param({"DefaultByteBufferPool", "DefaultByteBufferPool2", "DefaultByteBufferPool3", "DefaultByteBufferPool"})
-    @Param({"DefaultByteBufferPool4", "DefaultByteBufferPool"})
+    //@Param({"DefaultByteBufferPool", "DefaultByteBufferPool2", "DefaultByteBufferPool3", "DefaultByteBufferPool4"})
+    @Param({"DefaultByteBufferPool5"})
     private String poolType;
 
     @Param({"16384"})  // Buffer sizes to test
@@ -78,7 +78,7 @@ public class VirtualThreadPoolContentionBenchmark {
     @Param({"256"})  // Number of concurrent virtual threads allowed
     private int maxConcurrency;
 
-    @Param({"100000"})  // Total number of tasks
+    @Param({"1000000"})  // Total number of tasks
     private int numTasks;
 
     //@Param({"false", "true"})  // Whether to prefill the pool cache before benchmark
@@ -89,7 +89,7 @@ public class VirtualThreadPoolContentionBenchmark {
     @Param({"virtual", "platform"})  // Thread type to use
     private String threadType;
 
-    @Param({"0", "10"})  // Thread local cache size (0 = disabled)
+    @Param({"0"})  // Thread local cache size (0 = disabled)
     private int threadLocalCacheSize;
 
     @Param({"1000"})  // Maximum pool size
@@ -120,6 +120,9 @@ public class VirtualThreadPoolContentionBenchmark {
         } else if ("DefaultByteBufferPool4".equals(poolType)) {
             // DefaultByteBufferPool3(direct, bufferSize, maxPoolSize, threadLocalCacheSize)
             pool = new DefaultByteBufferPool4(true, bufferSize, maxPoolSize, threadLocalCacheSize);
+        } else if ("DefaultByteBufferPool5".equals(poolType)) {
+            // DefaultByteBufferPool3(direct, bufferSize, maxPoolSize, threadLocalCacheSize)
+            pool = new DefaultByteBufferPool5(true, bufferSize, maxPoolSize, threadLocalCacheSize);
         } else {
             throw new IllegalArgumentException("Unknown pool type: " + poolType);
         }
@@ -157,7 +160,7 @@ public class VirtualThreadPoolContentionBenchmark {
         }
 
         // Create reusable task to minimize object allocation (1 instance vs numTasks instances)
-        bufferTask = new ArithmeticTask();  // TEMP: Using arithmetic task instead of BufferTask
+        bufferTask = new BufferTask();
     }
 
     @Benchmark
