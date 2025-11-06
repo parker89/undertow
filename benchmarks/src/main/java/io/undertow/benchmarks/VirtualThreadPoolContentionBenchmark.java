@@ -6,6 +6,8 @@ import io.undertow.server.DefaultByteBufferPool;
 import io.undertow.server.DefaultByteBufferPool2;
 import io.undertow.server.DefaultByteBufferPool3;
 import io.undertow.server.DefaultByteBufferPool4;
+import io.undertow.server.DefaultByteBufferPool5;
+import io.undertow.server.DefaultByteBufferPool6;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.profile.JavaFlightRecorderProfiler;
@@ -64,7 +66,7 @@ public class VirtualThreadPoolContentionBenchmark {
     private Runnable bufferTask;
 
     //@Param({"DefaultByteBufferPool", "DefaultByteBufferPool2", "DefaultByteBufferPool3", "DefaultByteBufferPool4"})
-    @Param({"DefaultByteBufferPool5"})
+    @Param({"DefaultByteBufferPool6"})
     private String poolType;
 
     @Param({"16384"})  // Buffer sizes to test
@@ -74,8 +76,8 @@ public class VirtualThreadPoolContentionBenchmark {
     //@Param({"1", "2", "4", "8"})  // Number of concurrent virtual threads allowed
     //@Param({"64", "128", "256", "512", "1024", "2048", "4096"})  // Number of concurrent virtual threads allowed
 
-    //@Param({"8192", "16384", "32768"})  // Number of concurrent virtual threads allowed
-    @Param({"256"})  // Number of concurrent virtual threads allowed
+    //@Param({"8192", "16384", "32768"})  // Number of concurrent tasks allowed
+    @Param({"256"})  // Number of concurrent tasks allowed
     private int maxConcurrency;
 
     @Param({"1000000"})  // Total number of tasks
@@ -86,10 +88,13 @@ public class VirtualThreadPoolContentionBenchmark {
     //starts with a for column ordering purposes
     private boolean aPreFillCache;
 
-    @Param({"virtual", "platform"})  // Thread type to use
+    @Param({
+    //        "virtual",
+            "platform"
+    })  // Thread type to use
     private String threadType;
 
-    @Param({"0"})  // Thread local cache size (0 = disabled)
+    @Param({"0", "0"})  // Thread local cache size (0 = disabled)
     private int threadLocalCacheSize;
 
     @Param({"1000"})  // Maximum pool size
@@ -104,6 +109,13 @@ public class VirtualThreadPoolContentionBenchmark {
             throw new BenchmarkException(new RuntimeException(
                 "Skipping benchmark: virtual threads with thread-local cache size > 0 " +
                 "causes excessive memory usage (each virtual thread gets its own cache)"
+            ));
+        }
+
+        // Skip invalid combination: DefaultByteBufferPool6 with thread-local cache
+        if ("DefaultByteBufferPool6".equals(poolType) && threadLocalCacheSize > 0) {
+            throw new BenchmarkException(new RuntimeException(
+                "Skipping benchmark: DefaultByteBufferPool6 does not support thread-local cache"
             ));
         }
 
@@ -123,6 +135,9 @@ public class VirtualThreadPoolContentionBenchmark {
         } else if ("DefaultByteBufferPool5".equals(poolType)) {
             // DefaultByteBufferPool3(direct, bufferSize, maxPoolSize, threadLocalCacheSize)
             pool = new DefaultByteBufferPool5(true, bufferSize, maxPoolSize, threadLocalCacheSize);
+        } else if ("DefaultByteBufferPool6".equals(poolType)) {
+            // DefaultByteBufferPool3(direct, bufferSize, maxPoolSize, threadLocalCacheSize)
+            pool = new DefaultByteBufferPool6(true, bufferSize, maxPoolSize);
         } else {
             throw new IllegalArgumentException("Unknown pool type: " + poolType);
         }
