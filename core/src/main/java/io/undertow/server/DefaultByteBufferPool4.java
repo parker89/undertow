@@ -39,7 +39,8 @@ import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
  * @author Stuart Douglas
  */
 // TODO: move this somewhere more appropriate
-public class DefaultByteBufferPool implements ByteBufferPool {
+    // DefaultByteBufferPool4 shards the thread local weakhashmap
+public class DefaultByteBufferPool4 implements ByteBufferPool {
 
     private final ThreadLocalCache threadLocalCache = new ThreadLocalCache();
     // Access requires synchronization on the threadLocalDataList instance
@@ -55,22 +56,22 @@ public class DefaultByteBufferPool implements ByteBufferPool {
 
     @SuppressWarnings({"unused", "FieldCanBeLocal"})
     private volatile int currentQueueLength = 0;
-    private static final AtomicIntegerFieldUpdater<DefaultByteBufferPool> currentQueueLengthUpdater = AtomicIntegerFieldUpdater.newUpdater(DefaultByteBufferPool.class, "currentQueueLength");
+    private static final AtomicIntegerFieldUpdater<DefaultByteBufferPool4> currentQueueLengthUpdater = AtomicIntegerFieldUpdater.newUpdater(DefaultByteBufferPool4.class, "currentQueueLength");
 
     @SuppressWarnings({"unused", "FieldCanBeLocal"})
     private volatile int reclaimedThreadLocals = 0;
-    private static final AtomicIntegerFieldUpdater<DefaultByteBufferPool> reclaimedThreadLocalsUpdater = AtomicIntegerFieldUpdater.newUpdater(DefaultByteBufferPool.class, "reclaimedThreadLocals");
+    private static final AtomicIntegerFieldUpdater<DefaultByteBufferPool4> reclaimedThreadLocalsUpdater = AtomicIntegerFieldUpdater.newUpdater(DefaultByteBufferPool4.class, "reclaimedThreadLocals");
 
     private volatile boolean closed;
 
-    private final DefaultByteBufferPool arrayBackedPool;
+    private final DefaultByteBufferPool4 arrayBackedPool;
 
 
     /**
      * @param direct               If this implementation should use direct buffers
      * @param bufferSize           The buffer size to use
      */
-    public DefaultByteBufferPool(boolean direct, int bufferSize) {
+    public DefaultByteBufferPool4(boolean direct, int bufferSize) {
         this(direct, bufferSize, -1, 12, 0);
     }
     /**
@@ -79,14 +80,14 @@ public class DefaultByteBufferPool implements ByteBufferPool {
      * @param maximumPoolSize      The maximum pool size, in number of buffers, it does not include buffers in thread local caches
      * @param threadLocalCacheSize The maximum number of buffers that can be stored in a thread local cache
      */
-    public DefaultByteBufferPool(boolean direct, int bufferSize, int maximumPoolSize, int threadLocalCacheSize, int leakDecetionPercent) {
+    public DefaultByteBufferPool4(boolean direct, int bufferSize, int maximumPoolSize, int threadLocalCacheSize, int leakDecetionPercent) {
         this.direct = direct;
         this.bufferSize = bufferSize;
         this.maximumPoolSize = maximumPoolSize;
         this.threadLocalCacheSize = threadLocalCacheSize;
         this.leakDectionPercent = leakDecetionPercent;
         if(direct) {
-            arrayBackedPool = new DefaultByteBufferPool(false, bufferSize, maximumPoolSize, 0, leakDecetionPercent);
+            arrayBackedPool = new DefaultByteBufferPool4(false, bufferSize, maximumPoolSize, 0, leakDecetionPercent);
         } else {
             arrayBackedPool = this;
         }
@@ -99,7 +100,7 @@ public class DefaultByteBufferPool implements ByteBufferPool {
      * @param maximumPoolSize      The maximum pool size, in number of buffers, it does not include buffers in thread local caches
      * @param threadLocalCacheSize The maximum number of buffers that can be stored in a thread local cache
      */
-    public DefaultByteBufferPool(boolean direct, int bufferSize, int maximumPoolSize, int threadLocalCacheSize) {
+    public DefaultByteBufferPool4(boolean direct, int bufferSize, int maximumPoolSize, int threadLocalCacheSize) {
         this(direct, bufferSize, maximumPoolSize, threadLocalCacheSize, 0);
     }
 
@@ -250,14 +251,14 @@ public class DefaultByteBufferPool implements ByteBufferPool {
 
     private static class DefaultPooledBuffer implements PooledByteBuffer {
 
-        private final DefaultByteBufferPool pool;
+        private final DefaultByteBufferPool4 pool;
         private final LeakDetector leakDetector;
         private ByteBuffer buffer;
 
         private volatile int referenceCount = 1;
         private static final AtomicIntegerFieldUpdater<DefaultPooledBuffer> referenceCountUpdater = AtomicIntegerFieldUpdater.newUpdater(DefaultPooledBuffer.class, "referenceCount");
 
-        DefaultPooledBuffer(DefaultByteBufferPool pool, ByteBuffer buffer, boolean detectLeaks) {
+        DefaultPooledBuffer(DefaultByteBufferPool4 pool, ByteBuffer buffer, boolean detectLeaks) {
             this.pool = pool;
             this.buffer = buffer;
             this.leakDetector = detectLeaks ? new LeakDetector() : null;
@@ -306,7 +307,7 @@ public class DefaultByteBufferPool implements ByteBufferPool {
         @Override
         protected void finalize() throws Throwable {
             try {
-                reclaimedThreadLocalsUpdater.incrementAndGet(DefaultByteBufferPool.this);
+                reclaimedThreadLocalsUpdater.incrementAndGet(DefaultByteBufferPool4.this);
                 if (buffers != null) {
                     // Recycle them
                     ByteBuffer buffer;
@@ -345,22 +346,41 @@ public class DefaultByteBufferPool implements ByteBufferPool {
     // class can be called by a different thread than the one that initialized the data.
     private static class ThreadLocalCache {
 
-        final Map<Thread, ThreadLocalData> localsByThread = Collections.synchronizedMap(new WeakHashMap<>());
+        private final int shardCount;
+        private final Map<Thread, ThreadLocalData>[] shardedLocalsByThread;
+
+        @SuppressWarnings("unchecked")
+        ThreadLocalCache() {
+            this.shardCount = Math.max(1, Runtime.getRuntime().availableProcessors() * 2);
+            this.shardedLocalsByThread = new Map[shardCount];
+            for (int i = 0; i < shardCount; i++) {
+                shardedLocalsByThread[i] = Collections.synchronizedMap(new WeakHashMap<>());
+            }
+        }
+
+        private int getShardIndex() {
+            long threadId = Thread.currentThread().getId();
+            return (int)(threadId % shardCount);
+        }
 
         ThreadLocalData get() {
-            return localsByThread.get(Thread.currentThread());
+            return shardedLocalsByThread[getShardIndex()].get(Thread.currentThread());
         }
 
         void set(ThreadLocalData threadLocalData) {
-            localsByThread.put(Thread.currentThread(), threadLocalData);
+            shardedLocalsByThread[getShardIndex()].put(Thread.currentThread(), threadLocalData);
         }
 
         void remove(ThreadLocalData threadLocalData) {
             // Find the entry containing given data instance and remove it from the map.
-            for (Map.Entry<Thread, ThreadLocalData> entry: localsByThread.entrySet()) {
-                if (threadLocalData.equals(entry.getValue())) {
-                    localsByThread.remove(entry.getKey(), entry.getValue());
-                    break;
+            // We need to check all shards since we don't know which shard contains this data
+            for (int i = 0; i < shardCount; i++) {
+                Map<Thread, ThreadLocalData> shard = shardedLocalsByThread[i];
+                for (Map.Entry<Thread, ThreadLocalData> entry: shard.entrySet()) {
+                    if (threadLocalData.equals(entry.getValue())) {
+                        shard.remove(entry.getKey(), entry.getValue());
+                        return;
+                    }
                 }
             }
         }
