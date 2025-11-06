@@ -8,6 +8,9 @@ import io.undertow.server.DefaultByteBufferPool3;
 import io.undertow.server.DefaultByteBufferPool4;
 import io.undertow.server.DefaultByteBufferPool5;
 import io.undertow.server.DefaultByteBufferPool6;
+import io.undertow.server.DefaultByteBufferPool7;
+import io.undertow.server.DefaultByteBufferPool8;
+import io.undertow.server.DefaultByteBufferPool9;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.profile.JavaFlightRecorderProfiler;
@@ -37,12 +40,18 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 /**
- * JMH benchmark comparing DefaultByteBufferPool, DefaultByteBufferPool2, and DefaultByteBufferPool3
- * under high contention using virtual or platform threads.
+ * JMH benchmark comparing different ByteBufferPool implementations under high contention.
+ *
+ * Tests different queue implementations (ConcurrentLinkedQueue, ConcurrentLinkedDeque,
+ * LinkedBlockingQueue, LinkedBlockingDeque) with both FIFO and LIFO semantics.
  *
  * Creates many tasks (numTasks) but limits concurrent execution to maxConcurrency
  * using a semaphore. This simulates realistic contention where many tasks compete
  * for limited concurrency slots.
+ *
+ * Allocation modes:
+ * - batch: Allocate all 5 buffers, use them, then close all (tests bulk operations)
+ * - interleaved: Allocate one, use it, close it, repeat (tests frequent pool contention)
  */
 // Throughput mode - measures operations per second
 //@BenchmarkMode(Mode.Throughput)
@@ -55,7 +64,7 @@ import java.util.concurrent.TimeUnit;
 @State(Scope.Benchmark)
 @Fork(1)  // Single fork for consistency
 @Warmup(iterations = 3, time = 4)  // 3 warmup iterations, 2 seconds each
-@Measurement(iterations = 5, time = 30)  // 5 measurement iterations, 3 seconds each
+@Measurement(iterations = 5, time = 5)  // 5 measurement iterations, 3 seconds each
 @Threads(1)  // JMH thread count (we'll use virtual threads internally)
 public class VirtualThreadPoolContentionBenchmark {
 
@@ -66,7 +75,13 @@ public class VirtualThreadPoolContentionBenchmark {
     private Runnable bufferTask;
 
     //@Param({"DefaultByteBufferPool", "DefaultByteBufferPool2", "DefaultByteBufferPool3", "DefaultByteBufferPool4"})
-    @Param({"DefaultByteBufferPool6"})
+    @Param({
+            "DefaultByteBufferPool",
+            "DefaultByteBufferPool6",
+//            "DefaultByteBufferPool7",
+//            "DefaultByteBufferPool8",
+//            "DefaultByteBufferPool9",
+    })
     private String poolType;
 
     @Param({"16384"})  // Buffer sizes to test
@@ -83,22 +98,26 @@ public class VirtualThreadPoolContentionBenchmark {
     @Param({"1000000"})  // Total number of tasks
     private int numTasks;
 
-    //@Param({"false", "true"})  // Whether to prefill the pool cache before benchmark
-    @Param({"false"})  // Whether to prefill the pool cache before benchmark
-    //starts with a for column ordering purposes
-    private boolean aPreFillCache;
-
     @Param({
     //        "virtual",
             "platform"
     })  // Thread type to use
     private String threadType;
 
-    @Param({"0", "0"})  // Thread local cache size (0 = disabled)
+    @Param({
+            "0",
+            "6"
+    })  // Thread local cache size (0 = disabled)
     private int threadLocalCacheSize;
 
     @Param({"1000"})  // Maximum pool size
     private int maxPoolSize;
+
+    @Param({
+            "batch",
+            "interleaved"
+    })  // Allocation pattern: batch=allocate all then free all, interleaved=allocate one, free one, repeat
+    private String allocationMode;
 
     private static final int BUFFERS_PER_TASK = 5;
 
@@ -112,10 +131,13 @@ public class VirtualThreadPoolContentionBenchmark {
             ));
         }
 
-        // Skip invalid combination: DefaultByteBufferPool6 with thread-local cache
-        if ("DefaultByteBufferPool6".equals(poolType) && threadLocalCacheSize > 0) {
+        // Skip invalid combination: DefaultByteBufferPool6/7/8/9 with thread-local cache
+        if (("DefaultByteBufferPool6".equals(poolType) ||
+             "DefaultByteBufferPool7".equals(poolType) ||
+             "DefaultByteBufferPool8".equals(poolType) ||
+             "DefaultByteBufferPool9".equals(poolType)) && threadLocalCacheSize > 0) {
             throw new BenchmarkException(new RuntimeException(
-                "Skipping benchmark: DefaultByteBufferPool6 does not support thread-local cache"
+                "Skipping benchmark: " + poolType + " does not support thread-local cache"
             ));
         }
 
@@ -136,25 +158,19 @@ public class VirtualThreadPoolContentionBenchmark {
             // DefaultByteBufferPool3(direct, bufferSize, maxPoolSize, threadLocalCacheSize)
             pool = new DefaultByteBufferPool5(true, bufferSize, maxPoolSize, threadLocalCacheSize);
         } else if ("DefaultByteBufferPool6".equals(poolType)) {
-            // DefaultByteBufferPool3(direct, bufferSize, maxPoolSize, threadLocalCacheSize)
+            // DefaultByteBufferPool6(direct, bufferSize, maxPoolSize) - uses ConcurrentLinkedQueue (FIFO)
             pool = new DefaultByteBufferPool6(true, bufferSize, maxPoolSize);
+        } else if ("DefaultByteBufferPool7".equals(poolType)) {
+            // DefaultByteBufferPool7(direct, bufferSize, maxPoolSize) - uses ConcurrentLinkedDeque (LIFO)
+            pool = new DefaultByteBufferPool7(true, bufferSize, maxPoolSize);
+        } else if ("DefaultByteBufferPool8".equals(poolType)) {
+            // DefaultByteBufferPool8(direct, bufferSize, maxPoolSize) - uses LinkedBlockingQueue (FIFO)
+            pool = new DefaultByteBufferPool8(true, bufferSize, maxPoolSize);
+        } else if ("DefaultByteBufferPool9".equals(poolType)) {
+            // DefaultByteBufferPool9(direct, bufferSize, maxPoolSize) - uses LinkedBlockingDeque (LIFO)
+            pool = new DefaultByteBufferPool9(true, bufferSize, maxPoolSize);
         } else {
             throw new IllegalArgumentException("Unknown pool type: " + poolType);
-        }
-
-        // Optionally prefill the pool cache
-        if (aPreFillCache) {
-            PooledByteBuffer[] buffers = new PooledByteBuffer[maxPoolSize];
-
-            // Allocate all buffers
-            for (int i = 0; i < maxPoolSize; i++) {
-                buffers[i] = pool.allocate();
-            }
-
-            // Close all buffers (return them to the pool)
-            for (int i = 0; i < maxPoolSize; i++) {
-                buffers[i].close();
-            }
         }
     }
 
@@ -226,25 +242,41 @@ public class VirtualThreadPoolContentionBenchmark {
                 concurrencyLimiter.acquire();
 
                 try {
-                    // Allocate and close buffers
-                    PooledByteBuffer[] buffers = new PooledByteBuffer[BUFFERS_PER_TASK];
+                    if ("batch".equals(allocationMode)) {
+                        // Batch mode: Allocate all buffers, use them, then close all
+                        PooledByteBuffer[] buffers = new PooledByteBuffer[BUFFERS_PER_TASK];
 
-                    // Allocate all buffers
-                    for (int j = 0; j < BUFFERS_PER_TASK; j++) {
-                        buffers[j] = pool.allocate();
-                        if (buffers[j] == null) {
-                            throw new RuntimeException("Failed to allocate buffer");
+                        // Allocate all buffers
+                        for (int j = 0; j < BUFFERS_PER_TASK; j++) {
+                            buffers[j] = pool.allocate();
+                            if (buffers[j] == null) {
+                                throw new RuntimeException("Failed to allocate buffer");
+                            }
                         }
-                    }
 
-                    // Do minimal work with buffers (just write a byte to each)
-                    for (int j = 0; j < BUFFERS_PER_TASK; j++) {
-                        buffers[j].getBuffer().put((byte) j);
-                    }
+                        // Do minimal work with buffers (just write a byte to each)
+                        for (int j = 0; j < BUFFERS_PER_TASK; j++) {
+                            buffers[j].getBuffer().put((byte) j);
+                        }
 
-                    // Close all buffers (return to pool)
-                    for (int j = 0; j < BUFFERS_PER_TASK; j++) {
-                        buffers[j].close();
+                        // Close all buffers (return to pool)
+                        for (int j = 0; j < BUFFERS_PER_TASK; j++) {
+                            buffers[j].close();
+                        }
+                    } else if ("interleaved".equals(allocationMode)) {
+                        // Interleaved mode: Allocate one, use it, close it, repeat
+                        for (int j = 0; j < BUFFERS_PER_TASK; j++) {
+                            PooledByteBuffer buffer = pool.allocate();
+                            if (buffer == null) {
+                                throw new RuntimeException("Failed to allocate buffer");
+                            }
+                            // Do minimal work with buffer
+                            buffer.getBuffer().put((byte) j);
+                            // Immediately close and return to pool
+                            buffer.close();
+                        }
+                    } else {
+                        throw new IllegalArgumentException("Unknown allocation mode: " + allocationMode);
                     }
                 } finally {
                     // Always release the permit
