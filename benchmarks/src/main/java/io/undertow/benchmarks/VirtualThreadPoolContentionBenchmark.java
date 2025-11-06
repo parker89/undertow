@@ -11,6 +11,7 @@ import io.undertow.server.DefaultByteBufferPool6;
 import io.undertow.server.DefaultByteBufferPool7;
 import io.undertow.server.DefaultByteBufferPool8;
 import io.undertow.server.DefaultByteBufferPool9;
+import io.undertow.server.DefaultByteBufferPool10;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.profile.JavaFlightRecorderProfiler;
@@ -63,8 +64,8 @@ import java.util.concurrent.TimeUnit;
 
 @State(Scope.Benchmark)
 @Fork(1)  // Single fork for consistency
-@Warmup(iterations = 3, time = 4)  // 3 warmup iterations, 2 seconds each
-@Measurement(iterations = 5, time = 5)  // 5 measurement iterations, 3 seconds each
+@Warmup(iterations = 3, time = 5)
+@Measurement(iterations = 5, time = 5)
 @Threads(1)  // JMH thread count (we'll use virtual threads internally)
 public class VirtualThreadPoolContentionBenchmark {
 
@@ -76,11 +77,12 @@ public class VirtualThreadPoolContentionBenchmark {
 
     //@Param({"DefaultByteBufferPool", "DefaultByteBufferPool2", "DefaultByteBufferPool3", "DefaultByteBufferPool4"})
     @Param({
-            "DefaultByteBufferPool",
-            "DefaultByteBufferPool6",
+//            "DefaultByteBufferPool",
+//            "DefaultByteBufferPool6",
 //            "DefaultByteBufferPool7",
 //            "DefaultByteBufferPool8",
 //            "DefaultByteBufferPool9",
+            "DefaultByteBufferPool10",
     })
     private String poolType;
 
@@ -106,7 +108,7 @@ public class VirtualThreadPoolContentionBenchmark {
 
     @Param({
             "0",
-            "6"
+            //"6"
     })  // Thread local cache size (0 = disabled)
     private int threadLocalCacheSize;
 
@@ -115,7 +117,7 @@ public class VirtualThreadPoolContentionBenchmark {
 
     @Param({
             "batch",
-            "interleaved"
+            //"interleaved"
     })  // Allocation pattern: batch=allocate all then free all, interleaved=allocate one, free one, repeat
     private String allocationMode;
 
@@ -131,11 +133,12 @@ public class VirtualThreadPoolContentionBenchmark {
             ));
         }
 
-        // Skip invalid combination: DefaultByteBufferPool6/7/8/9 with thread-local cache
+        // Skip invalid combination: DefaultByteBufferPool6/7/8/9/10 with thread-local cache
         if (("DefaultByteBufferPool6".equals(poolType) ||
              "DefaultByteBufferPool7".equals(poolType) ||
              "DefaultByteBufferPool8".equals(poolType) ||
-             "DefaultByteBufferPool9".equals(poolType)) && threadLocalCacheSize > 0) {
+             "DefaultByteBufferPool9".equals(poolType) ||
+             "DefaultByteBufferPool10".equals(poolType)) && threadLocalCacheSize > 0) {
             throw new BenchmarkException(new RuntimeException(
                 "Skipping benchmark: " + poolType + " does not support thread-local cache"
             ));
@@ -169,6 +172,9 @@ public class VirtualThreadPoolContentionBenchmark {
         } else if ("DefaultByteBufferPool9".equals(poolType)) {
             // DefaultByteBufferPool9(direct, bufferSize, maxPoolSize) - uses LinkedBlockingDeque (LIFO)
             pool = new DefaultByteBufferPool9(true, bufferSize, maxPoolSize);
+        } else if ("DefaultByteBufferPool10".equals(poolType)) {
+            // DefaultByteBufferPool10(direct, bufferSize, maxPoolSize) - uses custom lock-free ring buffer
+            pool = new DefaultByteBufferPool10(true, bufferSize, maxPoolSize);
         } else {
             throw new IllegalArgumentException("Unknown pool type: " + poolType);
         }

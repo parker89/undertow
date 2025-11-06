@@ -22,19 +22,20 @@ import io.undertow.UndertowMessages;
 import io.undertow.connector.ByteBufferPool;
 import io.undertow.connector.PooledByteBuffer;
 import java.nio.ByteBuffer;
-import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicIntegerArray;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 /**
  * A byte buffer pool that supports reference counted pools.
+ * Uses LinkedBlockingQueue instead of ConcurrentLinkedQueue.
  *
  * @author Stuart Douglas
  */
-// DefaultByteBufferPool6 strips out thread local caching entirely
-public final class DefaultByteBufferPool6 implements ByteBufferPool {
+// DefaultByteBufferPool8 uses LinkedBlockingQueue instead of ConcurrentLinkedQueue
+public final class DefaultByteBufferPool8 implements ByteBufferPool {
 
-    private final ConcurrentLinkedQueue<ByteBuffer>[] queues;
+    private final LinkedBlockingQueue<ByteBuffer>[] queues;
     private final int queueCount;
     private final int perQueueMax;
 
@@ -45,13 +46,13 @@ public final class DefaultByteBufferPool6 implements ByteBufferPool {
 
     private volatile boolean closed;
 
-    private final DefaultByteBufferPool6 arrayBackedPool;
+    private final DefaultByteBufferPool8 arrayBackedPool;
 
     /**
      * @param direct               If this implementation should use direct buffers
      * @param bufferSize           The buffer size to use
      */
-    public DefaultByteBufferPool6(boolean direct, int bufferSize) {
+    public DefaultByteBufferPool8(boolean direct, int bufferSize) {
         this(direct, bufferSize, -1);
     }
 
@@ -60,7 +61,7 @@ public final class DefaultByteBufferPool6 implements ByteBufferPool {
      * @param bufferSize           The buffer size to use
      * @param maximumPoolSize      The maximum pool size, in number of buffers
      */
-    public DefaultByteBufferPool6(boolean direct, int bufferSize, int maximumPoolSize) {
+    public DefaultByteBufferPool8(boolean direct, int bufferSize, int maximumPoolSize) {
         this(direct, bufferSize, maximumPoolSize, Runtime.getRuntime().availableProcessors() * 8);
     }
 
@@ -71,21 +72,26 @@ public final class DefaultByteBufferPool6 implements ByteBufferPool {
      * @param queueCount           Number of queues to use for reduced contention
      */
     @SuppressWarnings("unchecked")
-    public DefaultByteBufferPool6(boolean direct, int bufferSize, int maximumPoolSize, int queueCount) {
+    public DefaultByteBufferPool8(boolean direct, int bufferSize, int maximumPoolSize, int queueCount) {
         this.direct = direct;
         this.bufferSize = bufferSize;
         this.queueCount = Math.max(1, queueCount);
 
         this.perQueueMax = maximumPoolSize >= 0 ? maximumPoolSize / this.queueCount : Integer.MAX_VALUE;
 
-        this.queues = new ConcurrentLinkedQueue[this.queueCount];
+        this.queues = new LinkedBlockingQueue[this.queueCount];
         this.currentQueueLengths = new AtomicIntegerArray(this.queueCount);
         for (int i = 0; i < this.queueCount; i++) {
-            this.queues[i] = new ConcurrentLinkedQueue<>();
+            // Create bounded or unbounded queue based on perQueueMax
+            if (perQueueMax < Integer.MAX_VALUE) {
+                this.queues[i] = new LinkedBlockingQueue<>(perQueueMax + 1);
+            } else {
+                this.queues[i] = new LinkedBlockingQueue<>();
+            }
         }
 
         if (direct) {
-            arrayBackedPool = new DefaultByteBufferPool6(false, bufferSize, maximumPoolSize, this.queueCount);
+            arrayBackedPool = new DefaultByteBufferPool8(false, bufferSize, maximumPoolSize, this.queueCount);
         } else {
             arrayBackedPool = this;
         }
@@ -156,7 +162,12 @@ public final class DefaultByteBufferPool6 implements ByteBufferPool {
             }
         } while (!currentQueueLengths.compareAndSet(queueIdx, size, size + 1));
 
-        queues[queueIdx].add(buffer);
+        // Use offer() instead of add() to avoid blocking if queue is bounded
+        if (!queues[queueIdx].offer(buffer)) {
+            // Queue is full, decrement the count and free the buffer
+            currentQueueLengths.decrementAndGet(queueIdx);
+            DirectByteBufferDeallocator6.free(buffer);
+        }
     }
 
     @Override
@@ -184,7 +195,7 @@ public final class DefaultByteBufferPool6 implements ByteBufferPool {
 
     private static class DefaultPooledBuffer implements PooledByteBuffer {
 
-        private final DefaultByteBufferPool6 pool;
+        private final DefaultByteBufferPool8 pool;
 
         private ByteBuffer buffer;
 
@@ -192,7 +203,7 @@ public final class DefaultByteBufferPool6 implements ByteBufferPool {
         private static final AtomicIntegerFieldUpdater<DefaultPooledBuffer> referenceCountUpdater =
                 AtomicIntegerFieldUpdater.newUpdater(DefaultPooledBuffer.class, "referenceCount");
 
-        DefaultPooledBuffer(DefaultByteBufferPool6 pool, ByteBuffer buffer) {
+        DefaultPooledBuffer(DefaultByteBufferPool8 pool, ByteBuffer buffer) {
             this.pool = pool;
             this.buffer = buffer;
         }
